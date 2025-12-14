@@ -112,3 +112,46 @@ export async function getSessionUsers(sessionId: string): Promise<User[]> {
 
   return data;
 }
+
+/**
+ * Update a user's display name
+ *
+ * @param userId - The UUID of the user
+ * @param displayName - New display name for the user
+ * @returns The updated user
+ */
+export async function updateUser(
+  userId: string,
+  displayName: string
+): Promise<User> {
+  const { data, error } = await supabase
+    .from('users')
+    .update({ display_name: displayName })
+    .eq('id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating user:', error);
+    throw new Error(`Failed to update user: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Delete a user
+ *
+ * @param userId - The UUID of the user to delete
+ */
+export async function deleteUser(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .delete()
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error deleting user:', error);
+    throw new Error(`Failed to delete user: ${error.message}`);
+  }
+}
