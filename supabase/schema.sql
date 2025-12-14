@@ -105,7 +105,7 @@ GROUP BY s.id, s.session_name, s.created_at;
 
 -- ============================================
 -- HELPER FUNCTION: Get matches for a session
--- Returns all movies that both users in a session liked
+-- Returns all movies that ALL users in a session liked
 -- ============================================
 CREATE OR REPLACE FUNCTION get_session_matches(session_uuid UUID)
 RETURNS TABLE (
@@ -116,7 +116,19 @@ RETURNS TABLE (
   genres TEXT[],
   description TEXT
 ) AS $$
+DECLARE
+  total_users INTEGER;
 BEGIN
+  -- Get the total number of users in the session
+  SELECT COUNT(*) INTO total_users
+  FROM users
+  WHERE session_id = session_uuid;
+
+  -- If there are no users, return empty result
+  IF total_users = 0 THEN
+    RETURN;
+  END IF;
+
   RETURN QUERY
   SELECT DISTINCT
     m.id,
@@ -127,17 +139,16 @@ BEGIN
     m.description
   FROM movies m
   WHERE m.id IN (
-    -- Get movies where both users said 'yes'
-    SELECT s1.movie_id
-    FROM swipes s1
-    INNER JOIN swipes s2 ON s1.movie_id = s2.movie_id
-    INNER JOIN users u1 ON s1.user_id = u1.id
-    INNER JOIN users u2 ON s2.user_id = u2.id
-    WHERE u1.session_id = session_uuid
-      AND u2.session_id = session_uuid
-      AND u1.id != u2.id
-      AND s1.choice = 'yes'
-      AND s2.choice = 'yes'
+    -- Get movies where ALL users said 'yes'
+    -- This works by counting how many 'yes' swipes each movie has
+    -- and only including movies where the count equals total_users
+    SELECT s.movie_id
+    FROM swipes s
+    INNER JOIN users u ON s.user_id = u.id
+    WHERE u.session_id = session_uuid
+      AND s.choice = 'yes'
+    GROUP BY s.movie_id
+    HAVING COUNT(DISTINCT s.user_id) = total_users
   )
   ORDER BY m.title;
 END;
@@ -148,6 +159,6 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 COMMENT ON TABLE movies IS 'Catalog of movies that users can swipe through';
 COMMENT ON TABLE sessions IS 'Matching sessions between users';
-COMMENT ON TABLE users IS 'Participants in a session (User A and User B)';
+COMMENT ON TABLE users IS 'Participants in a session';
 COMMENT ON TABLE swipes IS 'Records of user swipe decisions on movies';
-COMMENT ON FUNCTION get_session_matches IS 'Returns all movies that both users in a session liked';
+COMMENT ON FUNCTION get_session_matches IS 'Returns all movies that ALL users in a session liked';

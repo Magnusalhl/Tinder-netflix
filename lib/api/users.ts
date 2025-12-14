@@ -8,7 +8,36 @@ import { supabase } from '../supabase';
 import { User } from '../types';
 
 /**
+ * Create a single user for a session
+ *
+ * @param sessionId - The UUID of the session
+ * @param displayName - Display name for the user
+ * @returns The created user
+ */
+export async function createUser(
+  sessionId: string,
+  displayName: string
+): Promise<User> {
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      session_id: sessionId,
+      display_name: displayName,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating user:', error);
+    throw new Error(`Failed to create user: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
  * Create two users for a session (User A and User B)
+ * @deprecated Use createUser() instead for multi-device support
  *
  * @param sessionId - The UUID of the session
  * @param userAName - Display name for User A
