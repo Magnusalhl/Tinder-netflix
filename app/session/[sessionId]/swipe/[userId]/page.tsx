@@ -59,6 +59,14 @@ export default function SwipePage() {
 
         // Load all movies
         const allMovies = await getAllMovies();
+
+        // Check if there are no movies in the database
+        if (allMovies.length === 0) {
+          alert('No movies found in the database! Please run the seed.sql file from the supabase folder to populate movies. Instructions: 1) Go to your Supabase project, 2) Click "SQL Editor", 3) Copy and paste the contents of supabase/seed.sql, 4) Click "Run" to insert 40 movies.');
+          router.push('/');
+          return;
+        }
+
         setMovies(allMovies);
 
         // Check if user has already started swiping
