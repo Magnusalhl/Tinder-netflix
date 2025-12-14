@@ -8,8 +8,8 @@
  * - Loading movies
  * - Recording swipes
  * - Progress tracking
- * - Handover between users
- * - Redirect to results when complete
+ * - Waiting for other users to finish
+ * - Redirect to results when everyone completes
  */
 
 import { useState, useEffect } from 'react';
@@ -21,7 +21,6 @@ import { User, Movie, SwipeChoice } from '@/lib/types';
 import MovieCard from '@/components/MovieCard';
 import SwipeButtons from '@/components/SwipeButtons';
 import ProgressIndicator from '@/components/ProgressIndicator';
-import HandoverScreen from '@/components/HandoverScreen';
 
 export default function SwipePage() {
   const router = useRouter();
@@ -36,7 +35,8 @@ export default function SwipePage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSwipeLoading, setIsSwipeLoading] = useState(false);
-  const [showHandover, setShowHandover] = useState(false);
+  const [showWaiting, setShowWaiting] = useState(false);
+  const [usersStillSwiping, setUsersStillSwiping] = useState<User[]>([]);
 
   /**
    * Load initial data
@@ -89,22 +89,26 @@ export default function SwipePage() {
     users: User[],
     totalMovies: number
   ) => {
-    // Find the other user
-    const otherUser = users.find((u) => u.id !== user.id);
-    if (!otherUser) {
-      router.push(`/session/${sessionId}/results`);
-      return;
-    }
+    // Check swipe counts for all users
+    const userSwipeCounts = await Promise.all(
+      users.map(async (u) => ({
+        user: u,
+        count: await getUserSwipeCount(u.id),
+      }))
+    );
 
-    // Check if the other user has also completed swiping
-    const otherUserSwipeCount = await getUserSwipeCount(otherUser.id);
+    // Find users who haven't finished yet
+    const stillSwiping = userSwipeCounts
+      .filter(({ count }) => count < totalMovies)
+      .map(({ user }) => user);
 
-    if (otherUserSwipeCount >= totalMovies) {
-      // Both users are done - go to results
+    if (stillSwiping.length === 0) {
+      // Everyone is done - go to results
       router.push(`/session/${sessionId}/results`);
     } else {
-      // Show handover screen
-      setShowHandover(true);
+      // Show waiting screen
+      setUsersStillSwiping(stillSwiping);
+      setShowWaiting(true);
     }
   };
 
@@ -141,14 +145,39 @@ export default function SwipePage() {
   };
 
   /**
-   * Handle continuing after handover screen
+   * Poll to check if all users are done (when on waiting screen)
    */
-  const handleContinueAfterHandover = () => {
-    const otherUser = allUsers.find((u) => u.id !== userId);
-    if (otherUser) {
-      router.push(`/session/${sessionId}/swipe/${otherUser.id}`);
-    }
-  };
+  useEffect(() => {
+    if (!showWaiting || movies.length === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        // Check if all users have finished
+        const userSwipeCounts = await Promise.all(
+          allUsers.map(async (u) => ({
+            user: u,
+            count: await getUserSwipeCount(u.id),
+          }))
+        );
+
+        const stillSwiping = userSwipeCounts
+          .filter(({ count }) => count < movies.length)
+          .map(({ user }) => user);
+
+        if (stillSwiping.length === 0) {
+          // Everyone is done now - redirect to results
+          router.push(`/session/${sessionId}/results`);
+        } else {
+          // Update the list of users still swiping
+          setUsersStillSwiping(stillSwiping);
+        }
+      } catch (error) {
+        console.error('Error polling user progress:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [showWaiting, allUsers, movies.length, sessionId, router]);
 
   // Loading state
   if (isLoading) {
@@ -162,18 +191,57 @@ export default function SwipePage() {
     );
   }
 
-  // Show handover screen if needed
-  if (showHandover && currentUser) {
-    const otherUser = allUsers.find((u) => u.id !== userId);
-    if (otherUser) {
-      return (
-        <HandoverScreen
-          fromUser={currentUser}
-          toUser={otherUser}
-          onContinue={handleContinueAfterHandover}
-        />
-      );
-    }
+  // Show waiting screen if needed
+  if (showWaiting && currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full text-center">
+          {/* Icon */}
+          <div className="mb-6">
+            <div className="w-24 h-24 mx-auto bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center">
+              <div className="text-5xl">⏳</div>
+            </div>
+          </div>
+
+          {/* Message */}
+          <h2 className="text-3xl font-bold text-white mb-3">
+            Great Job, {currentUser.display_name}!
+          </h2>
+
+          <p className="text-lg text-white/80 mb-8">
+            You&apos;ve finished swiping. Waiting for others...
+          </p>
+
+          {/* List of users still swiping */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 mb-6">
+            <p className="text-sm font-semibold text-white/70 mb-3">
+              Still swiping:
+            </p>
+            <div className="space-y-2">
+              {usersStillSwiping.map((user) => (
+                <div
+                  key={user.id}
+                  className="flex items-center justify-center gap-2 text-white"
+                >
+                  <div className="animate-pulse w-2 h-2 bg-pink-500 rounded-full" />
+                  <span>{user.display_name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Auto-refresh indicator */}
+          <div className="flex items-center justify-center gap-2 text-white/60 text-sm">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/60 border-t-transparent" />
+            <span>Checking for updates...</span>
+          </div>
+
+          <p className="mt-6 text-sm text-white/60">
+            This page will automatically refresh when everyone finishes
+          </p>
+        </div>
+      </div>
+    );
   }
 
   // Get current movie

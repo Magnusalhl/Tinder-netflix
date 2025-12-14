@@ -33,9 +33,10 @@ export async function getSessionMatches(sessionId: string): Promise<Movie[]> {
 /**
  * Client-side implementation of match calculation
  * Fallback if the Postgres function doesn't work
+ * Works with N users - returns movies where ALL users said 'yes'
  *
  * @param sessionId - The UUID of the session
- * @returns Array of movies that both users liked
+ * @returns Array of movies that all users liked
  */
 async function getSessionMatchesClientSide(sessionId: string): Promise<Movie[]> {
   // 1. Get all users in the session
@@ -44,42 +45,53 @@ async function getSessionMatchesClientSide(sessionId: string): Promise<Movie[]> 
     .select('id')
     .eq('session_id', sessionId);
 
-  if (usersError || !users || users.length !== 2) {
-    console.error('Error fetching users or invalid user count:', usersError);
+  if (usersError || !users || users.length === 0) {
+    console.error('Error fetching users or no users found:', usersError);
     return [];
   }
 
-  const [userA, userB] = users;
+  const totalUsers = users.length;
 
-  // 2. Get all "yes" swipes for both users
-  const { data: userASwipes, error: swipesErrorA } = await supabase
+  // 2. Get all "yes" swipes for all users in the session
+  const { data: allSwipes, error: swipesError } = await supabase
     .from('swipes')
-    .select('movie_id')
-    .eq('user_id', userA.id)
+    .select('user_id, movie_id')
+    .in('user_id', users.map((u) => u.id))
     .eq('choice', 'yes');
 
-  const { data: userBSwipes, error: swipesErrorB } = await supabase
-    .from('swipes')
-    .select('movie_id')
-    .eq('user_id', userB.id)
-    .eq('choice', 'yes');
-
-  if (swipesErrorA || swipesErrorB) {
-    console.error('Error fetching swipes:', swipesErrorA || swipesErrorB);
+  if (swipesError) {
+    console.error('Error fetching swipes:', swipesError);
     return [];
   }
 
-  // 3. Find intersection of movie IDs
-  const userAMovieIds = new Set(userASwipes?.map((s) => s.movie_id) || []);
-  const userBMovieIds = userBSwipes?.map((s) => s.movie_id) || [];
+  if (!allSwipes || allSwipes.length === 0) {
+    return [];
+  }
 
-  const matchedMovieIds = userBMovieIds.filter((id) => userAMovieIds.has(id));
+  // 3. Count how many users liked each movie
+  const movieLikeCounts = new Map<string, Set<string>>();
+
+  for (const swipe of allSwipes) {
+    if (!movieLikeCounts.has(swipe.movie_id)) {
+      movieLikeCounts.set(swipe.movie_id, new Set());
+    }
+    movieLikeCounts.get(swipe.movie_id)!.add(swipe.user_id);
+  }
+
+  // 4. Find movies that ALL users liked
+  const matchedMovieIds: string[] = [];
+
+  for (const [movieId, userIds] of movieLikeCounts.entries()) {
+    if (userIds.size === totalUsers) {
+      matchedMovieIds.push(movieId);
+    }
+  }
 
   if (matchedMovieIds.length === 0) {
     return [];
   }
 
-  // 4. Fetch the full movie data for matched IDs
+  // 5. Fetch the full movie data for matched IDs
   const { data: movies, error: moviesError } = await supabase
     .from('movies')
     .select('*')
